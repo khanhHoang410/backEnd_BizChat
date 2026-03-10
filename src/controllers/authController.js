@@ -9,52 +9,64 @@ const generateToken = (userId) => {
 };
 
 const googleAuth = async (req,res)=>{
+
     try {
-        const {token} = req.body;
+         const {token} = req.body;
+        console.log('📥 Token nhận được từ frontend');
+        console.log('🔑 GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID);
+        console.log('🌐 GOOGLE_REDIRECT_URI:', process.env.GOOGLE_REDIRECT_URI);
+        
         // Verify Google Token 
-       const ticket = await client.verifyIdToken({
-        idToken: token,
-        audience: process.env.GOOGLE_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-    const {sub:goggleId,email,name,picture} = payload;
+        const ticket = await client.verifyIdToken({
+            idToken: token,
+            audience: process.env.GOOGLE_CLIENT_ID,
+        });
+        
+        const payload = ticket.getPayload();
+        console.log('✅ Google payload:', { email: payload.email, name: payload.name });
+        
+        const {sub:googleId, email, name, picture} = payload;
 
-    // find or create user
-    let user  = await User.findOne({email});
-    if(!user){
-        user = new User({
-            googleId,
-            email,
-            name,
-            avatar: picture,
-        })
+        // find or create user
+        let user = await User.findOne({email});
+        if(!user){
+            user = new User({
+                googleId,
+                email,
+                name,
+                avatar: picture,
+            })
+            await user.save();
+            console.log('✅ New user created:', user._id);
+        } else if (!user.googleId) {
+            // Link Google account to existing user
+            user.googleId = googleId;
+            user.avatar = picture || user.avatar;
+            await user.save();
+            console.log('✅ Existing user updated with Google ID:', user._id);
+        }
+        
+        // Update status
+        user.status = 'online';
         await user.save();
-
-    } else if (!user.googleId) {
-      // Link Google account to existing user
-      user.googleId = googleId;
-      user.avatar = picture || user.avatar;
-      await user.save();
-    }
-    // Update status
-    user.status = 'online';
-    await user.save();
-    // Generate JWT
-    const authToken = generateToken(user._id);
-    res.status(200).json({
-        user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        avatar: user.avatar,
-        role: user.role,
-        status: user.status,
-      },
-      token: authToken,
-    })
+        
+        // Generate JWT
+        const authToken = generateToken(user._id);
+        
+        res.status(200).json({
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                avatar: user.avatar,
+                role: user.role,
+                status: user.status,
+            },
+            token: authToken,
+        });
     } catch (error) {
-        console.error('Google auth error:', error);
-    res.status(401).json({ error: 'Authentication failed' });
+        console.error('❌ Google auth error:', error);
+        res.status(401).json({ error: 'Authentication failed: ' + error.message });
     }
 };
 const logout = async (req,res)=>{
