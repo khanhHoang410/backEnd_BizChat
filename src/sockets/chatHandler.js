@@ -8,7 +8,8 @@ const onlineUsers = new Map(); // userId -> socketId
 const initializeSocket = (io) => {
   io.on('connection', (socket) => {
     console.log('🔌 New socket connection:', socket.id);
-
+    console.log('📋 Headers:', socket.handshake.headers); // Debug headers
+    console.log('🌐 Transport:', socket.conn.transport.name); // Debug transport
     // User authentication via socket
     socket.on('authenticate', async (token) => {
       try {
