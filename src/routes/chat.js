@@ -1,32 +1,44 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const { auth } = require('../middleware/auth');
-const { upload } = require('../config/cloudinary'); // ← import multer+cloudinary
+const { upload } = require('../config/cloudinary');       // multer + Cloudinary (ảnh)
 const {
-  getConversations,
-  getMessages,
-  sendMessage,
-  markAsRead,
-  deleteMessage,
-  uploadFile
+  getConversations, getMessages, sendMessage,
+  markAsRead, deleteMessage,
+  uploadImage, uploadDocument, getFiles,
 } = require('../controllers/chatController');
 
-// Get all conversations
+// Multer memory storage cho file → Supabase
+const memoryUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // max 50MB
+  fileFilter: (req, file, cb) => {
+    // Chặn file ảnh — ảnh dùng route /upload/image
+    const imageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (imageTypes.includes(file.mimetype)) {
+      return cb(new Error('Use /upload/image for images'), false);
+    }
+    cb(null, true);
+  }
+});
+
+// ─── Chat routes ──────────────────────────────────────────────────────────────
 router.get('/conversations', auth, getConversations);
-
-// Get messages with user/group
 router.get('/messages/:targetId', auth, getMessages);
-
-// Send message (REST fallback)
 router.post('/send', auth, sendMessage);
-
-// Mark messages as read
 router.post('/mark-read', auth, markAsRead);
-
-// Delete message
 router.delete('/:messageId', auth, deleteMessage);
 
-// ✅ Upload ảnh lên Cloudinary — upload.single('file') xử lý multipart/form-data
-router.post('/upload', auth, upload.single('file'), uploadFile);
+// ─── Upload routes ────────────────────────────────────────────────────────────
+// Ảnh → Cloudinary
+router.post('/upload/image', auth, upload.single('file'), uploadImage);
+
+// File/Video → Supabase
+router.post('/upload/document', auth, memoryUpload.single('file'), uploadDocument);
+
+// Lấy danh sách file của conversation
+// GET /api/chat/files/:targetId?type=image|document|video|all
+router.get('/files/:targetId', auth, getFiles);
 
 module.exports = router;
