@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { auth } = require('../middleware/auth');
+const { upload } = require('../config/cloudinary'); // ← import multer+cloudinary
 const {
   getConversations,
   getMessages,
@@ -25,7 +26,7 @@ router.post('/mark-read', auth, markAsRead);
 // Delete message
 router.delete('/:messageId', auth, deleteMessage);
 
-// Upload file
-router.post('/upload', auth, uploadFile);
+// ✅ Upload ảnh lên Cloudinary — upload.single('file') xử lý multipart/form-data
+router.post('/upload', auth, upload.single('file'), uploadFile);
 
 module.exports = router;

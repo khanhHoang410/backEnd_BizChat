@@ -9,7 +9,6 @@ const getConversations = async (req, res) => {
     const userId = req.user._id;
     const { limit = 20, offset = 0 } = req.query;
 
-    // Get private chats
     const privateChats = await Message.aggregate([
       {
         $match: {
@@ -20,57 +19,35 @@ const getConversations = async (req, res) => {
           group: { $exists: false }
         }
       },
-      {
-        $sort: { createdAt: -1 }
-      },
+      { $sort: { createdAt: -1 } },
       {
         $group: {
           _id: {
-            $cond: [
-              { $eq: ["$sender", userId] },
-              "$receiver",
-              "$sender"
-            ]
+            $cond: [{ $eq: ['$sender', userId] }, '$receiver', '$sender']
           },
-          lastMessage: { $first: "$$ROOT" },
+          lastMessage: { $first: '$$ROOT' },
           unreadCount: {
             $sum: {
               $cond: [
-                { 
-                  $and: [
-                    { $not: { $in: [userId, "$readBy"] } },
-                    { $ne: ["$sender", userId] }
-                  ]
-                },
-                1,
-                0
+                { $and: [{ $not: { $in: [userId, '$readBy'] } }, { $ne: ['$sender', userId] }] },
+                1, 0
               ]
             }
           },
-          lastActivity: { $first: "$createdAt" }
+          lastActivity: { $first: '$createdAt' }
         }
       },
-      {
-        $sort: { lastActivity: -1 }
-      },
-      {
-        $skip: parseInt(offset)
-      },
-      {
-        $limit: parseInt(limit)
-      }
+      { $sort: { lastActivity: -1 } },
+      { $skip: parseInt(offset) },
+      { $limit: parseInt(limit) }
     ]);
 
-    // Get group chats user is member of
-    const groups = await Group.find({
-      'members.user': userId,
-      isActive: true
-    }).select('name avatar description');
+    const groups = await Group.find({ 'members.user': userId, isActive: true })
+      .select('name avatar description');
 
     const populatedChats = await Promise.all(
       privateChats.map(async (chat) => {
-        const user = await User.findById(chat._id)
-          .select('name avatar email status');
+        const user = await User.findById(chat._id).select('name avatar email status');
         return {
           type: 'private',
           id: chat._id,
@@ -95,9 +72,7 @@ const getConversations = async (req, res) => {
       lastActivity: new Date()
     }));
 
-    res.json({
-      conversations: [...populatedChats, ...groupChats]
-    });
+    res.json({ conversations: [...populatedChats, ...groupChats] });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -111,24 +86,13 @@ const getMessages = async (req, res) => {
     const userId = req.user._id;
 
     let query = {};
-    
-    // Check if target is group or user
     const isGroup = await Group.exists({ _id: targetId });
-    
+
     if (isGroup) {
-      // Check if user is member of group
-      const group = await Group.findOne({
-        _id: targetId,
-        'members.user': userId
-      });
-      
-      if (!group) {
-        return res.status(403).json({ error: 'Not a member of this group' });
-      }
-      
+      const group = await Group.findOne({ _id: targetId, 'members.user': userId });
+      if (!group) return res.status(403).json({ error: 'Not a member of this group' });
       query = { group: targetId };
     } else {
-      // Private chat
       query = {
         $or: [
           { sender: userId, receiver: targetId },
@@ -138,9 +102,7 @@ const getMessages = async (req, res) => {
       };
     }
 
-    if (before) {
-      query.createdAt = { $lt: new Date(before) };
-    }
+    if (before) query.createdAt = { $lt: new Date(before) };
 
     const messages = await Message.find(query)
       .populate('sender', 'name avatar')
@@ -149,28 +111,20 @@ const getMessages = async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
-    // Mark messages as read
     if (!isGroup) {
       await Message.updateMany(
-        {
-          sender: targetId,
-          receiver: userId,
-          readBy: { $ne: userId }
-        },
+        { sender: targetId, receiver: userId, readBy: { $ne: userId } },
         { $addToSet: { readBy: userId } }
       );
     }
 
-    res.json({
-      messages: messages.reverse(),
-      hasMore: messages.length === parseInt(limit)
-    });
+    res.json({ messages: messages.reverse(), hasMore: messages.length === parseInt(limit) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-// Send message (for REST API, socket is primary)
+// Send message
 const sendMessage = async (req, res) => {
   try {
     const { receiverId, groupId, content, type = 'text', attachments = [] } = req.body;
@@ -180,32 +134,15 @@ const sendMessage = async (req, res) => {
       return res.status(400).json({ error: 'Message content required' });
     }
 
-    let messageData = {
-      sender: senderId,
-      type,
-      content: content || '',
-      attachments
-    };
+    let messageData = { sender: senderId, type, content: content || '', attachments };
 
     if (groupId) {
-      // Group message
-      const group = await Group.findOne({
-        _id: groupId,
-        'members.user': senderId
-      });
-
-      if (!group) {
-        return res.status(403).json({ error: 'Not a member of this group' });
-      }
-
+      const group = await Group.findOne({ _id: groupId, 'members.user': senderId });
+      if (!group) return res.status(403).json({ error: 'Not a member of this group' });
       messageData.group = groupId;
     } else if (receiverId) {
-      // Private message
       const receiver = await User.findById(receiverId);
-      if (!receiver) {
-        return res.status(404).json({ error: 'Receiver not found' });
-      }
-
+      if (!receiver) return res.status(404).json({ error: 'Receiver not found' });
       messageData.receiver = receiverId;
       messageData.readBy = [senderId];
     } else {
@@ -214,11 +151,8 @@ const sendMessage = async (req, res) => {
 
     const message = new Message(messageData);
     await message.save();
-
     await message.populate('sender', 'name avatar');
-    if (message.receiver) {
-      await message.populate('receiver', 'name avatar');
-    }
+    if (message.receiver) await message.populate('receiver', 'name avatar');
 
     res.status(201).json({ message });
   } catch (error) {
@@ -231,15 +165,10 @@ const markAsRead = async (req, res) => {
   try {
     const { messageIds } = req.body;
     const userId = req.user._id;
-
     await Message.updateMany(
-      {
-        _id: { $in: messageIds },
-        readBy: { $ne: userId }
-      },
+      { _id: { $in: messageIds }, readBy: { $ne: userId } },
       { $addToSet: { readBy: userId } }
     );
-
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -251,47 +180,50 @@ const deleteMessage = async (req, res) => {
   try {
     const { messageId } = req.params;
     const userId = req.user._id;
-
-    const message = await Message.findOne({
-      _id: messageId,
-      sender: userId
-    });
-
-    if (!message) {
-      return res.status(404).json({ error: 'Message not found or not authorized' });
-    }
-
+    const message = await Message.findOne({ _id: messageId, sender: userId });
+    if (!message) return res.status(404).json({ error: 'Message not found or not authorized' });
     message.isDeleted = true;
     message.deletedAt = new Date();
     await message.save();
-
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-// Upload file
+// ✅ Upload file lên Cloudinary (multer đã xử lý trước khi vào đây)
 const uploadFile = async (req, res) => {
   try {
-    // This would integrate with multer/cloud storage
-    // For now, just accept file metadata
-    const { name, url, type, size, groupId, receiverId } = req.body;
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const { receiverId, groupId } = req.body;
     const uploadedBy = req.user._id;
 
+    // req.file.path = URL Cloudinary sau khi upload
     const file = new File({
-      name,
-      url,
-      type,
-      size,
+      name: req.file.originalname || 'photo.jpg',
+      url: req.file.path,          // Cloudinary URL
+      type: 'image',
+      size: req.file.size || 0,
       uploadedBy,
       group: groupId || null,
-      receiver: receiverId || null
+      receiver: receiverId || null,
+      storageType: 'cloudinary',   // đánh dấu lưu trên Cloudinary
     });
 
     await file.save();
 
-    res.status(201).json({ file });
+    res.status(201).json({
+      file: {
+        _id: file._id,
+        name: file.name,
+        url: file.url,
+        type: file.type,
+        size: file.size,
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

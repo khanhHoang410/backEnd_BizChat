@@ -12,12 +12,15 @@
   "type": "commonjs",
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "cloudinary": "^1.41.3",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "google-auth-library": "^10.6.1",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.1.5",
+    "multer": "^2.1.1",
+    "multer-storage-cloudinary": "^4.0.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3"
   },
