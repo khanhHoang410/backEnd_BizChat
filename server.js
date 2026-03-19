@@ -9,54 +9,57 @@ const authRoutes = require('./src/routes/auth');
 const chatRoutes = require('./src/routes/chat');
 const userRoutes = require('./src/routes/users');
 const groupRoutes = require('./src/routes/groups');
-// const adminRoutes = require('./src/routes/admin'); // route not created yet
-
 
 const { initializeSocket } = require('./src/sockets/chatHandler');
 
 const app = express();
 const server = http.createServer(app);
 
+// ─── CORS config ──────────────────────────────────────────────────────────────
+// Cho phép tất cả origin vì đây là mobile app (không có domain cố định)
+const corsOptions = {
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false, // phải false khi origin: '*'
+};
+
 // Socket.io setup
 const io = socketIo(server, {
   cors: {
-    origin: process.env.NODE_ENV === 'development' 
-      ? "*" 
-      : ["https://yourapp.com", "https://admin.yourapp.com"],
-    methods: ["GET", "POST"],
-    credentials: true
+    origin: '*',
+    methods: ['GET', 'POST'],
   },
   transports: ['websocket', 'polling']
 });
 
 // Middleware
-app.use(cors({
-  origin: process.env.NODE_ENV === 'development' 
-    ? "*" 
-    : ["https://yourapp.com", "https://admin.yourapp.com"],
-  credentials: true
-}));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Database connection
 mongoose.connect(process.env.MONGODB_URI)
-.then(() => console.log('✅ MongoDB connected'))
-.catch(err => console.log('❌ MongoDB connection error:', err));
+  .then(() => console.log('✅ MongoDB connected'))
+  .catch(err => console.log('❌ MongoDB connection error:', err));
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', env: process.env.NODE_ENV, time: new Date() });
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/groups', groupRoutes);
-// app.use('/api/admin', adminRoutes); // route not created yet
 
 // Initialize socket
 initializeSocket(io);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
+  console.error('❌ Error:', err.message);
+  res.status(500).json({ error: err.message || 'Something went wrong!' });
 });
 
 // Start server
