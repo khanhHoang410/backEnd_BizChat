@@ -11,7 +11,7 @@ const fileSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['image', 'document', 'video', 'audio', 'other'],
+    enum: ['server', 'google_drive', 's3', 'cloudinary', 'supabase'],
     required: true,
   },
   size: {
