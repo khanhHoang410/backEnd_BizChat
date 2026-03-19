@@ -2,69 +2,63 @@ const Message = require('../models/Message');
 const User = require('../models/User');
 const Group = require('../models/Group');
 
-// Store online users
 const onlineUsers = new Map(); // userId -> socketId
 
 const initializeSocket = (io) => {
   io.on('connection', (socket) => {
     console.log('🔌 New socket connection:', socket.id);
-    console.log('📋 Headers:', socket.handshake.headers); // Debug headers
-    console.log('🌐 Transport:', socket.conn.transport.name); // Debug transport
-    // User authentication via socket
+    console.log('🌐 Transport:', socket.conn.transport.name);
+
+    // ─── Authenticate ─────────────────────────────────────────────────────────
     socket.on('authenticate', async (token) => {
       try {
         const jwt = require('jsonwebtoken');
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const userId = decoded.userId;
 
-        // Store user socket mapping
         onlineUsers.set(userId, socket.id);
         socket.userId = userId;
 
-        // Update user status
         await User.findByIdAndUpdate(userId, {
           status: 'online',
           socketId: socket.id,
           lastSeen: new Date(),
         });
 
-        // Join user room
         socket.join(`user:${userId}`);
-        
-        // Notify friends/contacts
-        socket.broadcast.emit('user_status_change', {
-          userId,
-          status: 'online',
-        });
-
+        socket.broadcast.emit('user_status_change', { userId, status: 'online' });
         console.log(`✅ User ${userId} authenticated on socket`);
       } catch (error) {
         console.error('Socket authentication failed:', error);
       }
     });
 
-    // Send private message
+    // ─── Send private message ─────────────────────────────────────────────────
     socket.on('send_private_message', async (data) => {
       try {
         const { receiverId, content, type = 'text', attachments = [] } = data;
         const senderId = socket.userId;
 
-        // Create message in DB
+        // Parse attachments nếu là string
+        let parsedAttachments = attachments;
+        if (typeof attachments === 'string') {
+          try { parsedAttachments = JSON.parse(attachments); }
+          catch { parsedAttachments = []; }
+        }
+
         const message = new Message({
           sender: senderId,
           receiver: receiverId,
           type,
           content,
-          attachments,
+          attachments: parsedAttachments,
           readBy: [senderId],
         });
 
         await message.save();
-
-        // Populate sender info
         await message.populate('sender', 'name avatar');
 
-        // Send to receiver if online
+        // Gửi đến receiver nếu online
         const receiverSocketId = onlineUsers.get(receiverId);
         if (receiverSocketId) {
           io.to(receiverSocketId).emit('receive_message', {
@@ -73,7 +67,7 @@ const initializeSocket = (io) => {
           });
         }
 
-        // Send confirmation to sender
+        // Confirm cho sender
         socket.emit('message_sent', {
           messageId: message._id,
           status: 'delivered',
@@ -86,7 +80,7 @@ const initializeSocket = (io) => {
       }
     });
 
-    // Join group
+    // ─── Join group ───────────────────────────────────────────────────────────
     socket.on('join_group', async (groupId) => {
       try {
         socket.join(`group:${groupId}`);
@@ -96,36 +90,39 @@ const initializeSocket = (io) => {
       }
     });
 
-    // Send group message
+    // ─── Send group message ───────────────────────────────────────────────────
     socket.on('send_group_message', async (data) => {
       try {
         const { groupId, content, type = 'text', attachments = [] } = data;
         const senderId = socket.userId;
 
-        // Check if user is group member
+        // Parse attachments nếu là string
+        let parsedAttachments = attachments;
+        if (typeof attachments === 'string') {
+          try { parsedAttachments = JSON.parse(attachments); }
+          catch { parsedAttachments = []; }
+        }
+
         const group = await Group.findById(groupId);
         if (!group || !group.members.some(m => m.user.toString() === senderId)) {
           throw new Error('Not a group member');
         }
 
-        // Create message
         const message = new Message({
           sender: senderId,
           group: groupId,
           type,
           content,
-          attachments,
+          attachments: parsedAttachments,
           readBy: [senderId],
         });
 
         await message.save();
         await message.populate('sender', 'name avatar');
 
-        // Update group last message
         group.lastMessage = message._id;
         await group.save();
 
-        // Broadcast to group
         io.to(`group:${groupId}`).emit('receive_message', {
           message: message.toObject(),
           type: 'group',
@@ -138,20 +135,18 @@ const initializeSocket = (io) => {
       }
     });
 
-    // Typing indicator
+    // ─── Typing indicator ─────────────────────────────────────────────────────
     socket.on('typing', (data) => {
       const { receiverId, isTyping, groupId } = data;
       const senderId = socket.userId;
 
       if (groupId) {
-        // Group typing
         socket.to(`group:${groupId}`).emit('user_typing', {
           userId: senderId,
           groupId,
           isTyping,
         });
       } else if (receiverId) {
-        // Private typing
         const receiverSocketId = onlineUsers.get(receiverId);
         if (receiverSocketId) {
           io.to(receiverSocketId).emit('user_typing', {
@@ -162,19 +157,18 @@ const initializeSocket = (io) => {
       }
     });
 
-    // Disconnect
+    // ─── Disconnect ───────────────────────────────────────────────────────────
     socket.on('disconnect', async () => {
       try {
         const userId = socket.userId;
         if (userId) {
           onlineUsers.delete(userId);
-          
+
           await User.findByIdAndUpdate(userId, {
             status: 'offline',
             lastSeen: new Date(),
           });
 
-          // Notify contacts
           socket.broadcast.emit('user_status_change', {
             userId,
             status: 'offline',
