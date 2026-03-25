@@ -32,6 +32,10 @@ const io = socketIo(server, {
   },
   transports: ['websocket', 'polling']
 });
+app.use((req, res, next) => {
+    console.log(`📡 ${req.method} ${req.url}`);
+    next();
+});
 
 // Middleware
 app.use(cors(corsOptions));

@@ -3,6 +3,9 @@ const User = require('../models/User');
 
 // Create new group
 const createGroup = async (req, res) => {
+      console.log('📝 CreateGroup called');
+    console.log('📦 Request body:', req.body);
+    console.log('👤 User:', req.user ? req.user._id : 'No user');
   try {
     const { name, description, avatar, memberIds, isPrivate = false } = req.body;
     const createdBy = req.user._id;
@@ -30,6 +33,7 @@ const createGroup = async (req, res) => {
 
     res.status(201).json({ group });
   } catch (error) {
+     console.error('❌ CreateGroup error:', error);
     res.status(500).json({ error: error.message });
   }
 };
