@@ -2,28 +2,45 @@ const Message = require('../models/Message');
 const User = require('../models/User');
 const Group = require('../models/Group');
 const File = require('../models/File');
+const mongoose = require('mongoose');
 const { uploadFileToSupabase } = require('../config/supabase');
 
+// FIX: cast userId sang ObjectId trước khi dùng trong aggregate pipeline
 const getConversations = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = new mongoose.Types.ObjectId(req.user._id);
     const { limit = 20, offset = 0 } = req.query;
 
     const privateChats = await Message.aggregate([
       {
         $match: {
-          $or: [{ sender: userId, receiver: { $exists: true } }, { receiver: userId }],
-          group: { $exists: false }
+          $or: [
+            { sender: userId, receiver: { $exists: true } },
+            { receiver: userId }
+          ],
+          group: { $exists: false },
+          isDeleted: false,
         }
       },
       { $sort: { createdAt: -1 } },
       {
         $group: {
-          _id: { $cond: [{ $eq: ['$sender', userId] }, '$receiver', '$sender'] },
+          _id: {
+            $cond: [{ $eq: ['$sender', userId] }, '$receiver', '$sender']
+          },
           lastMessage: { $first: '$$ROOT' },
           unreadCount: {
             $sum: {
-              $cond: [{ $and: [{ $not: { $in: [userId, '$readBy'] } }, { $ne: ['$sender', userId] }] }, 1, 0]
+              $cond: [
+                {
+                  $and: [
+                    { $not: { $in: [userId, '$readBy'] } },
+                    { $ne: ['$sender', userId] }
+                  ]
+                },
+                1,
+                0
+              ]
             }
           },
           lastActivity: { $first: '$createdAt' }
@@ -34,25 +51,74 @@ const getConversations = async (req, res) => {
       { $limit: parseInt(limit) }
     ]);
 
-    const groups = await Group.find({ 'members.user': userId, isActive: true }).select('name avatar description');
+    const groups = await Group.find({ 'members.user': userId, isActive: true })
+      .select('name avatar description lastMessage updatedAt')
+      .populate('lastMessage', 'content sender createdAt type');
 
     const populatedChats = await Promise.all(
       privateChats.map(async (chat) => {
         const user = await User.findById(chat._id).select('name avatar email status');
         return {
-          type: 'private', id: chat._id, name: user?.name || 'Unknown',
-          avatar: user?.avatar, lastMessage: chat.lastMessage?.content,
-          unreadCount: chat.unreadCount, lastActivity: chat.lastActivity, status: user?.status
+          type: 'private',
+          id: chat._id,
+          name: user?.name || 'Unknown',
+          avatar: user?.avatar,
+          lastMessage: chat.lastMessage?.content || '',
+          unreadCount: chat.unreadCount,
+          lastActivity: chat.lastActivity,
+          status: user?.status
         };
       })
     );
 
-    const groupChats = groups.map(group => ({
-      type: 'group', id: group._id, name: group.name, avatar: group.avatar,
-      description: group.description, lastMessage: null, unreadCount: 0, lastActivity: new Date()
-    }));
+    // FIX: lấy lastMessage thực từ DB cho mỗi group
+    const groupChats = await Promise.all(
+      groups.map(async (group) => {
+        // Đếm unread cho group
+        const unreadCount = await Message.countDocuments({
+          group: group._id,
+          readBy: { $ne: userId },
+          sender: { $ne: userId },
+          isDeleted: false,
+        });
 
-    res.json({ conversations: [...populatedChats, ...groupChats] });
+        // Lấy tin nhắn cuối của group nếu lastMessage chưa populate đủ
+        let lastMessageContent = '';
+        let lastActivity = group.updatedAt;
+
+        if (group.lastMessage) {
+          lastMessageContent = group.lastMessage.content || '';
+          lastActivity = group.lastMessage.createdAt || group.updatedAt;
+        } else {
+          // Fallback: query trực tiếp
+          const lastMsg = await Message.findOne({ group: group._id, isDeleted: false })
+            .sort({ createdAt: -1 })
+            .select('content createdAt');
+          if (lastMsg) {
+            lastMessageContent = lastMsg.content;
+            lastActivity = lastMsg.createdAt;
+          }
+        }
+
+        return {
+          type: 'group',
+          id: group._id,
+          name: group.name,
+          avatar: group.avatar,
+          description: group.description,
+          lastMessage: lastMessageContent,
+          unreadCount,
+          lastActivity,
+        };
+      })
+    );
+
+    // Gộp và sort theo lastActivity
+    const allConversations = [...populatedChats, ...groupChats].sort(
+      (a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+    );
+
+    res.json({ conversations: allConversations });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -73,12 +139,16 @@ const getMessages = async (req, res) => {
       query = { group: targetId };
     } else {
       query = {
-        $or: [{ sender: userId, receiver: targetId }, { sender: targetId, receiver: userId }],
+        $or: [
+          { sender: userId, receiver: targetId },
+          { sender: targetId, receiver: userId }
+        ],
         group: { $exists: false }
       };
     }
 
     if (before) query.createdAt = { $lt: new Date(before) };
+    query.isDeleted = false;
 
     const messages = await Message.find(query)
       .populate('sender', 'name avatar')
@@ -115,6 +185,13 @@ const sendMessage = async (req, res) => {
       const group = await Group.findOne({ _id: groupId, 'members.user': senderId });
       if (!group) return res.status(403).json({ error: 'Not a member of this group' });
       messageData.group = groupId;
+
+      // Cập nhật lastMessage cho group
+      const message = new Message(messageData);
+      await message.save();
+      await Group.findByIdAndUpdate(groupId, { lastMessage: message._id });
+      await message.populate('sender', 'name avatar');
+      return res.status(201).json({ message });
     } else if (receiverId) {
       const receiver = await User.findById(receiverId);
       if (!receiver) return res.status(404).json({ error: 'Receiver not found' });
@@ -139,7 +216,10 @@ const markAsRead = async (req, res) => {
   try {
     const { messageIds } = req.body;
     const userId = req.user._id;
-    await Message.updateMany({ _id: { $in: messageIds }, readBy: { $ne: userId } }, { $addToSet: { readBy: userId } });
+    await Message.updateMany(
+      { _id: { $in: messageIds }, readBy: { $ne: userId } },
+      { $addToSet: { readBy: userId } }
+    );
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -161,7 +241,7 @@ const deleteMessage = async (req, res) => {
   }
 };
 
-// ─── Upload ảnh → Cloudinary ──────────────────────────────────────────────────
+// Upload ảnh → Cloudinary
 const uploadImage = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -171,7 +251,7 @@ const uploadImage = async (req, res) => {
 
     const file = new File({
       name: req.file.originalname || 'photo.jpg',
-      url: req.file.path,       // Cloudinary trả về URL trong req.file.path
+      url: req.file.path,
       type: 'image',
       size: req.file.size || 0,
       uploadedBy,
@@ -189,7 +269,7 @@ const uploadImage = async (req, res) => {
   }
 };
 
-// ─── Upload file/video → Supabase ─────────────────────────────────────────────
+// Upload file/video → Supabase
 const uploadDocument = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -197,7 +277,6 @@ const uploadDocument = async (req, res) => {
     const { receiverId, groupId } = req.body;
     const uploadedBy = req.user._id;
 
-    // Xác định loại file từ mimetype
     const mime = req.file.mimetype;
     let fileType = 'other';
     if (mime.startsWith('video/')) fileType = 'video';
@@ -208,7 +287,6 @@ const uploadDocument = async (req, res) => {
       mime.includes('zip') || mime.includes('rar')
     ) fileType = 'document';
 
-    // Upload lên Supabase Storage
     const uploaded = await uploadFileToSupabase({
       buffer: req.file.buffer,
       mimetype: req.file.mimetype,
@@ -218,7 +296,6 @@ const uploadDocument = async (req, res) => {
       uploadedBy: uploadedBy.toString(),
     });
 
-    // Lưu metadata vào MongoDB
     const file = new File({
       name: uploaded.name,
       url: uploaded.url,
@@ -240,11 +317,11 @@ const uploadDocument = async (req, res) => {
   }
 };
 
-// ─── Lấy danh sách file theo conversation ─────────────────────────────────────
+// Lấy danh sách file theo conversation
 const getFiles = async (req, res) => {
   try {
     const { targetId } = req.params;
-    const { type } = req.query; // image | document | video | all
+    const { type } = req.query;
     const userId = req.user._id;
 
     const isGroup = await Group.exists({ _id: targetId });

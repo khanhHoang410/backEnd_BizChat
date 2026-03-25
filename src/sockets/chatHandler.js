@@ -30,16 +30,25 @@ const initializeSocket = (io) => {
         console.log(`✅ User ${userId} authenticated on socket`);
       } catch (error) {
         console.error('Socket authentication failed:', error);
+        socket.emit('auth_error', { error: 'Authentication failed' });
       }
     });
 
     // ─── Send private message ─────────────────────────────────────────────────
     socket.on('send_private_message', async (data) => {
+      // FIX: guard nếu chưa authenticate
+      if (!socket.userId) {
+        return socket.emit('message_error', { error: 'Not authenticated' });
+      }
+
       try {
         const { receiverId, content, type = 'text', attachments = [] } = data;
         const senderId = socket.userId;
 
-        // Parse attachments nếu là string
+        if (!receiverId || !content) {
+          return socket.emit('message_error', { error: 'Missing receiverId or content' });
+        }
+
         let parsedAttachments = attachments;
         if (typeof attachments === 'string') {
           try { parsedAttachments = JSON.parse(attachments); }
@@ -58,7 +67,6 @@ const initializeSocket = (io) => {
         await message.save();
         await message.populate('sender', 'name avatar');
 
-        // Gửi đến receiver nếu online
         const receiverSocketId = onlineUsers.get(receiverId);
         if (receiverSocketId) {
           io.to(receiverSocketId).emit('receive_message', {
@@ -67,7 +75,6 @@ const initializeSocket = (io) => {
           });
         }
 
-        // Confirm cho sender
         socket.emit('message_sent', {
           messageId: message._id,
           status: 'delivered',
@@ -82,7 +89,22 @@ const initializeSocket = (io) => {
 
     // ─── Join group ───────────────────────────────────────────────────────────
     socket.on('join_group', async (groupId) => {
+      // FIX: guard nếu chưa authenticate
+      if (!socket.userId) {
+        return socket.emit('message_error', { error: 'Not authenticated' });
+      }
+
       try {
+        const group = await Group.findOne({
+          _id: groupId,
+          'members.user': socket.userId,
+          isActive: true,
+        });
+
+        if (!group) {
+          return socket.emit('message_error', { error: 'Group not found or not a member' });
+        }
+
         socket.join(`group:${groupId}`);
         console.log(`User ${socket.userId} joined group ${groupId}`);
       } catch (error) {
@@ -92,11 +114,19 @@ const initializeSocket = (io) => {
 
     // ─── Send group message ───────────────────────────────────────────────────
     socket.on('send_group_message', async (data) => {
+      // FIX: guard nếu chưa authenticate
+      if (!socket.userId) {
+        return socket.emit('message_error', { error: 'Not authenticated' });
+      }
+
       try {
         const { groupId, content, type = 'text', attachments = [] } = data;
         const senderId = socket.userId;
 
-        // Parse attachments nếu là string
+        if (!groupId || !content) {
+          return socket.emit('message_error', { error: 'Missing groupId or content' });
+        }
+
         let parsedAttachments = attachments;
         if (typeof attachments === 'string') {
           try { parsedAttachments = JSON.parse(attachments); }
@@ -105,7 +135,7 @@ const initializeSocket = (io) => {
 
         const group = await Group.findById(groupId);
         if (!group || !group.members.some(m => m.user.toString() === senderId)) {
-          throw new Error('Not a group member');
+          return socket.emit('message_error', { error: 'Not a group member' });
         }
 
         const message = new Message({
@@ -120,6 +150,7 @@ const initializeSocket = (io) => {
         await message.save();
         await message.populate('sender', 'name avatar');
 
+        // FIX: cập nhật lastMessage cho group
         group.lastMessage = message._id;
         await group.save();
 
@@ -137,6 +168,9 @@ const initializeSocket = (io) => {
 
     // ─── Typing indicator ─────────────────────────────────────────────────────
     socket.on('typing', (data) => {
+      // FIX: guard
+      if (!socket.userId) return;
+
       const { receiverId, isTyping, groupId } = data;
       const senderId = socket.userId;
 
@@ -161,21 +195,21 @@ const initializeSocket = (io) => {
     socket.on('disconnect', async () => {
       try {
         const userId = socket.userId;
-        if (userId) {
-          onlineUsers.delete(userId);
+        if (!userId) return; // FIX: guard nếu chưa authenticate lúc disconnect
 
-          await User.findByIdAndUpdate(userId, {
-            status: 'offline',
-            lastSeen: new Date(),
-          });
+        onlineUsers.delete(userId);
 
-          socket.broadcast.emit('user_status_change', {
-            userId,
-            status: 'offline',
-          });
+        await User.findByIdAndUpdate(userId, {
+          status: 'offline',
+          lastSeen: new Date(),
+        });
 
-          console.log(`❌ User ${userId} disconnected`);
-        }
+        socket.broadcast.emit('user_status_change', {
+          userId,
+          status: 'offline',
+        });
+
+        console.log(`❌ User ${userId} disconnected`);
       } catch (error) {
         console.error('Disconnect error:', error);
       }
