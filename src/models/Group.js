@@ -74,9 +74,9 @@ const groupSchema = new mongoose.Schema({
   },
 });
 
-groupSchema.pre('save', function(next) {
+groupSchema.pre('save', async function () {
   this.updatedAt = Date.now();
-  next();
 });
+
 
 module.exports = mongoose.model('Group', groupSchema);
