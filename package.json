@@ -12,6 +12,7 @@
   "type": "commonjs",
   "dependencies": {
     "@supabase/supabase-js": "^2.99.2",
+    "agora-access-token": "^2.0.4",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^1.41.3",
     "cors": "^2.8.6",

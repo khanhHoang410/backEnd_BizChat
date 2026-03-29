@@ -9,6 +9,7 @@ const authRoutes = require('./src/routes/auth');
 const chatRoutes = require('./src/routes/chat');
 const userRoutes = require('./src/routes/users');
 const groupRoutes = require('./src/routes/groups');
+const agoraRoutes = require('./routes/agora');
 
 const { initializeSocket } = require('./src/sockets/chatHandler');
 
@@ -56,6 +57,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/groups', groupRoutes);
+app.use('/api/agora', auth, agoraRoutes); 
+
 
 // Initialize socket
 initializeSocket(io);
