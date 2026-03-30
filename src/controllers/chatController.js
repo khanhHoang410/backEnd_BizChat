@@ -462,5 +462,6 @@ const getPinnedMessages = async (req, res) => {
 module.exports = {
   getConversations, getMessages, sendMessage,
   markAsRead, deleteMessage, revokeMessage,
-  uploadImage, uploadDocument, getFiles,
+  uploadImage, uploadDocument, getFiles,pinMessage,         
+  getPinnedMessages,    
 };

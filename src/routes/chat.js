@@ -7,6 +7,8 @@ const {
   getConversations, getMessages, sendMessage,
   markAsRead, deleteMessage, revokeMessage,
   uploadImage, uploadDocument, getFiles,
+  pinMessage,           
+  getPinnedMessages,    
 } = require('../controllers/chatController');
 
 const memoryUpload = multer({
