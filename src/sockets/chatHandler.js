@@ -214,6 +214,30 @@ const initializeSocket = (io) => {
         console.error('Disconnect error:', error);
       }
     });
+    // offer call
+    socket.on('call_offer', ({ to, channelName, callerName, callerAvatar, type }) => {
+      const targetSocket = onlineUsers.get(to);
+      if (targetSocket) {
+        io.to(targetSocket).emit('incoming_call', { from: socket.userId, channelName, callerName, callerAvatar, type });
+      }
+    });
+    // call accepted
+    socket.on('call_accept', ({ to, channelName }) => {
+      const targetSocket = onlineUsers.get(to);
+      if (targetSocket) io.to(targetSocket).emit('call_accepted', { channelName });
+    });
+    // call reject
+    socket.on('call_reject', ({ to }) => {
+      const targetSocket = onlineUsers.get(to);
+      if (targetSocket) io.to(targetSocket).emit('call_rejected');
+    });
+    // call end
+    socket.on('call_end', ({ to, channelName }) => {
+      const targetSocket = onlineUsers.get(to);
+      if (targetSocket) io.to(targetSocket).emit('call_ended', { channelName });
+    });
+    
+
   });
 };
 
