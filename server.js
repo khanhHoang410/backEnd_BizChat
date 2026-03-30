@@ -10,6 +10,8 @@ const chatRoutes = require('./src/routes/chat');
 const userRoutes = require('./src/routes/users');
 const groupRoutes = require('./src/routes/groups');
 const agoraRoutes = require('./src/routes/agora');
+const { auth } = require('./src/middleware/auth');
+
 
 const { initializeSocket } = require('./src/sockets/chatHandler');
 
