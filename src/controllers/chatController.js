@@ -5,7 +5,6 @@ const File = require('../models/File');
 const mongoose = require('mongoose');
 const { uploadFileToSupabase } = require('../config/supabase');
 
-// FIX: cast userId sang ObjectId trước khi dùng trong aggregate pipeline
 const getConversations = async (req, res) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user._id);
@@ -71,10 +70,8 @@ const getConversations = async (req, res) => {
       })
     );
 
-    // FIX: lấy lastMessage thực từ DB cho mỗi group
     const groupChats = await Promise.all(
       groups.map(async (group) => {
-        // Đếm unread cho group
         const unreadCount = await Message.countDocuments({
           group: group._id,
           readBy: { $ne: userId },
@@ -82,7 +79,6 @@ const getConversations = async (req, res) => {
           isDeleted: false,
         });
 
-        // Lấy tin nhắn cuối của group nếu lastMessage chưa populate đủ
         let lastMessageContent = '';
         let lastActivity = group.updatedAt;
 
@@ -90,7 +86,6 @@ const getConversations = async (req, res) => {
           lastMessageContent = group.lastMessage.content || '';
           lastActivity = group.lastMessage.createdAt || group.updatedAt;
         } else {
-          // Fallback: query trực tiếp
           const lastMsg = await Message.findOne({ group: group._id, isDeleted: false })
             .sort({ createdAt: -1 })
             .select('content createdAt');
@@ -113,7 +108,6 @@ const getConversations = async (req, res) => {
       })
     );
 
-    // Gộp và sort theo lastActivity
     const allConversations = [...populatedChats, ...groupChats].sort(
       (a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
     );
@@ -186,7 +180,6 @@ const sendMessage = async (req, res) => {
       if (!group) return res.status(403).json({ error: 'Not a member of this group' });
       messageData.group = groupId;
 
-      // Cập nhật lastMessage cho group
       const message = new Message(messageData);
       await message.save();
       await Group.findByIdAndUpdate(groupId, { lastMessage: message._id });
@@ -241,7 +234,32 @@ const deleteMessage = async (req, res) => {
   }
 };
 
-// Upload ảnh → Cloudinary
+// ── Thu hồi tin nhắn ──────────────────────────────────────────────────────────
+const revokeMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user._id;
+
+    const message = await Message.findOne({ _id: messageId, sender: userId });
+
+    if (!message) {
+      return res.status(404).json({ error: 'Tin nhắn không tồn tại hoặc bạn không có quyền thu hồi' });
+    }
+
+    if (message.isRevoked) {
+      return res.status(400).json({ error: 'Tin nhắn đã được thu hồi trước đó' });
+    }
+
+    message.isRevoked = true;
+    message.revokedAt = new Date();
+    await message.save();
+
+    res.json({ success: true, messageId: message._id });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 const uploadImage = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -269,7 +287,6 @@ const uploadImage = async (req, res) => {
   }
 };
 
-// Upload file/video → Supabase
 const uploadDocument = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -317,7 +334,6 @@ const uploadDocument = async (req, res) => {
   }
 };
 
-// Lấy danh sách file theo conversation
 const getFiles = async (req, res) => {
   try {
     const { targetId } = req.params;
@@ -350,6 +366,6 @@ const getFiles = async (req, res) => {
 
 module.exports = {
   getConversations, getMessages, sendMessage,
-  markAsRead, deleteMessage,
+  markAsRead, deleteMessage, revokeMessage,
   uploadImage, uploadDocument, getFiles,
 };

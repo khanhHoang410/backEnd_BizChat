@@ -12,10 +12,9 @@ const messageSchema = new mongoose.Schema({
   },
   content: { type: String, required: true },
 
-  // ← SỬA: attachments là array of objects thay vì [String]
   attachments: [{
     url: { type: String, default: '' },
-    type: { type: String, default: 'other' }, // image | document | video | audio | other
+    type: { type: String, default: 'other' },
     name: { type: String, default: '' },
     size: { type: Number, default: 0 },
     thumbnail: { type: String, default: '' },
@@ -34,8 +33,15 @@ const messageSchema = new mongoose.Schema({
   },
   readBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   reactions: [{ user: mongoose.Schema.Types.ObjectId, emoji: String }],
+
+  // ── Xóa cứng ──────────────────────────────────────────────────
   isDeleted: { type: Boolean, default: false },
   deletedAt: Date,
+
+  // ── Thu hồi (hiển thị "Tin nhắn đã được thu hồi") ─────────────
+  isRevoked: { type: Boolean, default: false },
+  revokedAt: Date,
+
   createdAt: { type: Date, default: Date.now, index: true },
 });
 

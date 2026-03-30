@@ -2,14 +2,13 @@ const Message = require('../models/Message');
 const User = require('../models/User');
 const Group = require('../models/Group');
 
-const onlineUsers = new Map(); // userId -> socketId
+const onlineUsers = new Map();
 
 const initializeSocket = (io) => {
   io.on('connection', (socket) => {
     console.log('🔌 New socket connection:', socket.id);
     console.log('🌐 Transport:', socket.conn.transport.name);
 
-    // ─── Authenticate ─────────────────────────────────────────────────────────
     socket.on('authenticate', async (token) => {
       try {
         const jwt = require('jsonwebtoken');
@@ -34,9 +33,7 @@ const initializeSocket = (io) => {
       }
     });
 
-    // ─── Send private message ─────────────────────────────────────────────────
     socket.on('send_private_message', async (data) => {
-      // FIX: guard nếu chưa authenticate
       if (!socket.userId) {
         return socket.emit('message_error', { error: 'Not authenticated' });
       }
@@ -79,17 +76,13 @@ const initializeSocket = (io) => {
           messageId: message._id,
           status: 'delivered',
         });
-
-        console.log(`📨 Private message from ${senderId} to ${receiverId}`);
       } catch (error) {
         console.error('Send message error:', error);
         socket.emit('message_error', { error: 'Failed to send message' });
       }
     });
 
-    // ─── Join group ───────────────────────────────────────────────────────────
     socket.on('join_group', async (groupId) => {
-      // FIX: guard nếu chưa authenticate
       if (!socket.userId) {
         return socket.emit('message_error', { error: 'Not authenticated' });
       }
@@ -106,15 +99,12 @@ const initializeSocket = (io) => {
         }
 
         socket.join(`group:${groupId}`);
-        console.log(`User ${socket.userId} joined group ${groupId}`);
       } catch (error) {
         console.error('Join group error:', error);
       }
     });
 
-    // ─── Send group message ───────────────────────────────────────────────────
     socket.on('send_group_message', async (data) => {
-      // FIX: guard nếu chưa authenticate
       if (!socket.userId) {
         return socket.emit('message_error', { error: 'Not authenticated' });
       }
@@ -150,7 +140,6 @@ const initializeSocket = (io) => {
         await message.save();
         await message.populate('sender', 'name avatar');
 
-        // FIX: cập nhật lastMessage cho group
         group.lastMessage = message._id;
         await group.save();
 
@@ -158,17 +147,48 @@ const initializeSocket = (io) => {
           message: message.toObject(),
           type: 'group',
         });
-
-        console.log(`📢 Group message in ${groupId} from ${senderId}`);
       } catch (error) {
         console.error('Send group message error:', error);
         socket.emit('message_error', { error: 'Failed to send group message' });
       }
     });
 
-    // ─── Typing indicator ─────────────────────────────────────────────────────
+    // ── Thu hồi tin nhắn ──────────────────────────────────────────────────────
+    socket.on('revoke_message', async ({ messageId, receiverId, groupId }) => {
+      if (!socket.userId) return;
+
+      try {
+        const message = await Message.findOne({ _id: messageId, sender: socket.userId });
+
+        if (!message || message.isRevoked) return;
+
+        message.isRevoked = true;
+        message.revokedAt = new Date();
+        await message.save();
+
+        // Thông báo cho người nhận (private)
+        if (receiverId) {
+          const receiverSocketId = onlineUsers.get(receiverId);
+          if (receiverSocketId) {
+            io.to(receiverSocketId).emit('message_revoked', { messageId });
+          }
+        }
+
+        // Thông báo cho cả nhóm (group)
+        if (groupId) {
+          io.to(`group:${groupId}`).emit('message_revoked', { messageId });
+        }
+
+        // Xác nhận cho người gửi
+        socket.emit('message_revoked', { messageId });
+
+        console.log(`🔄 Message ${messageId} revoked by ${socket.userId}`);
+      } catch (error) {
+        console.error('Revoke message error:', error);
+      }
+    });
+
     socket.on('typing', (data) => {
-      // FIX: guard
       if (!socket.userId) return;
 
       const { receiverId, isTyping, groupId } = data;
@@ -191,11 +211,10 @@ const initializeSocket = (io) => {
       }
     });
 
-    // ─── Disconnect ───────────────────────────────────────────────────────────
     socket.on('disconnect', async () => {
       try {
         const userId = socket.userId;
-        if (!userId) return; // FIX: guard nếu chưa authenticate lúc disconnect
+        if (!userId) return;
 
         onlineUsers.delete(userId);
 
@@ -208,41 +227,38 @@ const initializeSocket = (io) => {
           userId,
           status: 'offline',
         });
-
-        console.log(`❌ User ${userId} disconnected`);
       } catch (error) {
         console.error('Disconnect error:', error);
       }
     });
-    // offer call
+
     socket.on('call_offer', ({ to, channelName, callerName, callerAvatar, type }) => {
       const targetSocket = onlineUsers.get(to);
       if (targetSocket) {
         io.to(targetSocket).emit('incoming_call', { from: socket.userId, channelName, callerName, callerAvatar, type });
       }
     });
-    // call accepted
+
     socket.on('call_accept', ({ to, channelName }) => {
       const targetSocket = onlineUsers.get(to);
       if (targetSocket) io.to(targetSocket).emit('call_accepted', { channelName });
     });
-    // call reject
+
     socket.on('call_reject', ({ to }) => {
       const targetSocket = onlineUsers.get(to);
       if (targetSocket) io.to(targetSocket).emit('call_rejected');
     });
-    // call end
+
     socket.on('call_end', ({ to, channelName }) => {
       const targetSocket = onlineUsers.get(to);
       if (targetSocket) io.to(targetSocket).emit('call_ended', { channelName });
     });
-   // Offer group call
+
     socket.on('group_call_offer', async ({ groupId, channelName, callerName, callerAvatar }) => {
       try {
         const group = await Group.findById(groupId);
         if (!group) return;
 
-        // Lấy danh sách member online
         const memberIds = group.members.map(m => m.user.toString());
         const onlineMembers = memberIds.filter(mid => onlineUsers.has(mid));
 
@@ -263,11 +279,9 @@ const initializeSocket = (io) => {
       }
     });
 
-    // Accept group call
     socket.on('group_call_accept', ({ groupId, channelName }) => {
       const group = Group.findById(groupId);
       if (!group) return;
-
       const memberIds = group.members.map(m => m.user.toString());
       memberIds.forEach(memberId => {
         const targetSocketId = onlineUsers.get(memberId);
@@ -277,11 +291,9 @@ const initializeSocket = (io) => {
       });
     });
 
-    // End group call
     socket.on('group_call_end', ({ groupId, channelName }) => {
       const group = Group.findById(groupId);
       if (!group) return;
-
       const memberIds = group.members.map(m => m.user.toString());
       memberIds.forEach(memberId => {
         const targetSocketId = onlineUsers.get(memberId);
@@ -290,9 +302,6 @@ const initializeSocket = (io) => {
         }
       });
     });
-
-    
-
   });
 };
 
