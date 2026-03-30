@@ -27,6 +27,8 @@ router.get('/messages/:targetId', auth, getMessages);
 router.post('/send', auth, sendMessage);
 router.post('/mark-read', auth, markAsRead);
 router.delete('/:messageId', auth, deleteMessage);
+router.patch('/:messageId/pin', auth, pinMessage);
+router.get('/pinned/:targetId', auth, getPinnedMessages);
 
 // ── Thu hồi tin nhắn ─────────────────────────────────────────────────────────
 router.patch('/:messageId/revoke', auth, revokeMessage);

@@ -41,6 +41,9 @@ const messageSchema = new mongoose.Schema({
   // ── Thu hồi (hiển thị "Tin nhắn đã được thu hồi") ─────────────
   isRevoked: { type: Boolean, default: false },
   revokedAt: Date,
+  
+  pinned: { type: Boolean, default: false },
+  pinnedAt: { type: Date },
 
   createdAt: { type: Date, default: Date.now, index: true },
 });

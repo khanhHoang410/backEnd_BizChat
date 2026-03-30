@@ -363,6 +363,101 @@ const getFiles = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+// ─── Ghim / bỏ ghim tin nhắn ────────────────────────────────────────────────
+const pinMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user._id;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ error: 'Tin nhắn không tồn tại' });
+    }
+
+    // Kiểm tra quyền: chỉ người gửi hoặc admin nhóm (nếu là group) mới được ghim?
+    // Ở đây tôi cho phép bất kỳ thành viên nào trong cuộc trò chuyện đều có thể ghim.
+    // Nếu muốn chỉ admin nhóm mới được ghim, cần thêm logic kiểm tra group admin.
+
+    // Kiểm tra nếu là group, người dùng có trong group không
+    if (message.group) {
+      const group = await Group.findOne({ _id: message.group, 'members.user': userId });
+      if (!group) {
+        return res.status(403).json({ error: 'Bạn không phải thành viên của nhóm này' });
+      }
+    } else if (message.receiver) {
+      // Private: chỉ 2 người liên quan mới được ghim
+      if (message.sender.toString() !== userId.toString() && message.receiver.toString() !== userId.toString()) {
+        return res.status(403).json({ error: 'Bạn không có quyền ghim tin nhắn này' });
+      }
+    } else {
+      return res.status(400).json({ error: 'Tin nhắn không hợp lệ' });
+    }
+
+    // Nếu đã ghim thì bỏ ghim, ngược lại ghim
+    const isPinned = message.pinned;
+    message.pinned = !isPinned;
+    message.pinnedAt = isPinned ? null : new Date();
+    await message.save();
+
+    // Gửi socket update realtime
+    const io = req.app.get('io'); // cần truyền io từ server.js vào
+    if (io) {
+      if (message.group) {
+        io.to(`group:${message.group}`).emit('message_pinned', {
+          messageId: message._id,
+          pinned: message.pinned,
+          pinnedAt: message.pinnedAt,
+        });
+      } else {
+        // private: gửi cho cả sender và receiver
+        const senderSocket = onlineUsers.get(message.sender.toString());
+        const receiverSocket = onlineUsers.get(message.receiver.toString());
+        if (senderSocket) io.to(senderSocket).emit('message_pinned', { messageId: message._id, pinned: message.pinned, pinnedAt: message.pinnedAt });
+        if (receiverSocket) io.to(receiverSocket).emit('message_pinned', { messageId: message._id, pinned: message.pinned, pinnedAt: message.pinnedAt });
+      }
+    }
+
+    res.json({ success: true, pinned: message.pinned, pinnedAt: message.pinnedAt });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+const getPinnedMessages = async (req, res) => {
+  try {
+    const { targetId } = req.params; // có thể là userId (private) hoặc groupId
+    const userId = req.user._id;
+
+    // Xác định loại conversation
+    const isGroup = await Group.exists({ _id: targetId });
+    let query = { pinned: true };
+
+    if (isGroup) {
+      // Kiểm tra thành viên
+      const group = await Group.findOne({ _id: targetId, 'members.user': userId });
+      if (!group) return res.status(403).json({ error: 'Not a member of this group' });
+      query.group = targetId;
+    } else {
+      // Private: tin nhắn giữa userId và targetId
+      query = {
+        $or: [
+          { sender: userId, receiver: targetId },
+          { sender: targetId, receiver: userId }
+        ],
+        group: { $exists: false },
+        pinned: true,
+      };
+    }
+
+    const messages = await Message.find(query)
+      .populate('sender', 'name avatar')
+      .populate('receiver', 'name avatar')
+      .sort({ pinnedAt: -1, createdAt: -1 }); // mới nhất lên đầu
+
+    res.json({ messages });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
 
 module.exports = {
   getConversations, getMessages, sendMessage,
