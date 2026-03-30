@@ -236,6 +236,61 @@ const initializeSocket = (io) => {
       const targetSocket = onlineUsers.get(to);
       if (targetSocket) io.to(targetSocket).emit('call_ended', { channelName });
     });
+   // Offer group call
+    socket.on('group_call_offer', async ({ groupId, channelName, callerName, callerAvatar }) => {
+      try {
+        const group = await Group.findById(groupId);
+        if (!group) return;
+
+        // Lấy danh sách member online
+        const memberIds = group.members.map(m => m.user.toString());
+        const onlineMembers = memberIds.filter(mid => onlineUsers.has(mid));
+
+        onlineMembers.forEach(memberId => {
+          const targetSocketId = onlineUsers.get(memberId);
+          if (targetSocketId) {
+            io.to(targetSocketId).emit('incoming_group_call', {
+              from: socket.userId,
+              groupId,
+              channelName,
+              callerName,
+              callerAvatar,
+            });
+          }
+        });
+      } catch (error) {
+        console.error('Group call offer error:', error);
+      }
+    });
+
+    // Accept group call
+    socket.on('group_call_accept', ({ groupId, channelName }) => {
+      const group = Group.findById(groupId);
+      if (!group) return;
+
+      const memberIds = group.members.map(m => m.user.toString());
+      memberIds.forEach(memberId => {
+        const targetSocketId = onlineUsers.get(memberId);
+        if (targetSocketId) {
+          io.to(targetSocketId).emit('group_call_accepted', { channelName });
+        }
+      });
+    });
+
+    // End group call
+    socket.on('group_call_end', ({ groupId, channelName }) => {
+      const group = Group.findById(groupId);
+      if (!group) return;
+
+      const memberIds = group.members.map(m => m.user.toString());
+      memberIds.forEach(memberId => {
+        const targetSocketId = onlineUsers.get(memberId);
+        if (targetSocketId) {
+          io.to(targetSocketId).emit('group_call_ended', { channelName });
+        }
+      });
+    });
+
     
 
   });
