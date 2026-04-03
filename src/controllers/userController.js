@@ -1,6 +1,5 @@
 const User = require('../models/User');
 
-// Get all users
 const getUsers = async (req, res) => {
     try {
         const { search = '', page = 1, limit = 20 } = req.query;
@@ -18,7 +17,7 @@ const getUsers = async (req, res) => {
             ];
         }
         
-        const users = await User.find(query) // ← Sửa: user -> users
+        const users = await User.find(query)
             .select('name email avatar status role lastSeen')
             .skip(skip)
             .limit(parseInt(limit))
@@ -96,7 +95,6 @@ const updateStatus = async (req, res) => {
     }
 };
 
-// Get online users (RIÊNG)
 const getOnlineUsers = async (req, res) => {
     try {
         const onlineUsers = await User.find({
@@ -110,11 +108,39 @@ const getOnlineUsers = async (req, res) => {
     }
 };
 
-// Export tất cả (ĐÚNG)
+// ── Lưu push token ────────────────────────────────────────────────────────────
+const savePushToken = async (req, res) => {
+    try {
+        const { pushToken } = req.body;
+
+        if (!pushToken) {
+            return res.status(400).json({ error: 'pushToken is required' });
+        }
+
+        await User.findByIdAndUpdate(req.user._id, { pushToken });
+
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// ── Xóa push token (khi logout) ───────────────────────────────────────────────
+const removePushToken = async (req, res) => {
+    try {
+        await User.findByIdAndUpdate(req.user._id, { pushToken: null });
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
 module.exports = {
     getUsers,
     getUserById,
     updateProfile,
     updateStatus,
-    getOnlineUsers
+    getOnlineUsers,
+    savePushToken,
+    removePushToken,
 };

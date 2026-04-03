@@ -6,22 +6,19 @@ const {
   getUserById,
   updateProfile,
   updateStatus,
-  getOnlineUsers
+  getOnlineUsers,
+  savePushToken,
+  removePushToken,
 } = require('../controllers/userController');
 
-// Get all users (search and pagination)
 router.get('/', auth, getUsers);
-
-// Get online users
 router.get('/online', auth, getOnlineUsers);
-
-// Get user by ID
 router.get('/:id', auth, getUserById);
-
-// Update current user profile
 router.put('/profile', auth, updateProfile);
-
-// Update user status
 router.put('/status', auth, updateStatus);
+
+// ── Push token ────────────────────────────────────────────────────────────────
+router.post('/push-token', auth, savePushToken);       // lưu token khi login
+router.delete('/push-token', auth, removePushToken);   // xóa token khi logout
 
 module.exports = router;

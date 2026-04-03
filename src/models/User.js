@@ -31,6 +31,11 @@ const userSchema = new mongoose.Schema({
     default: 'user',
   },
   socketId: String,
+  pushToken: {
+    type: String,
+    default: null,
+  },
+ 
   lastSeen: {
     type: Date,
     default: Date.now,
