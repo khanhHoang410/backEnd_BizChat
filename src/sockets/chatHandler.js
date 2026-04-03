@@ -311,9 +311,62 @@ const initializeSocket = (io) => {
       if (targetSocket) io.to(targetSocket).emit('call_rejected');
     });
 
-    socket.on('call_end', ({ to, channelName }) => {
+    socket.on('call_end', async ({ to, channelName, duration = 0, isGroup = false, groupId = null }) => {
       const targetSocket = onlineUsers.get(to);
       if (targetSocket) io.to(targetSocket).emit('call_ended', { channelName });
+
+      // ── Lưu tin nhắn system ghi nhận cuộc gọi ────────────────────────────────
+      try {
+        const senderId = socket.userId;
+        if (!senderId) return;
+
+        const mins = Math.floor(duration / 60).toString().padStart(2, '0');
+        const secs = (duration % 60).toString().padStart(2, '0');
+        const durationText = duration > 0 ? `${mins}:${secs}` : '';
+        const content = duration > 0
+          ? `📞 Cuộc gọi video • ${durationText}`
+          : '📞 Cuộc gọi video đã kết thúc';
+
+        let messageData = {
+          sender: senderId,
+          type: 'system',
+          content,
+          readBy: [senderId],
+        };
+
+        if (isGroup && groupId) {
+          // Group call
+          messageData.group = groupId;
+          const message = new Message(messageData);
+          await message.save();
+          await message.populate('sender', 'name avatar');
+          io.to(`group:${groupId}`).emit('receive_message', {
+            message: message.toObject(),
+            type: 'group',
+          });
+        } else if (to) {
+          // Private call — gửi cho cả 2 người
+          messageData.receiver = to;
+          const message = new Message(messageData);
+          await message.save();
+          await message.populate('sender', 'name avatar');
+
+          // Gửi cho người nhận
+          if (targetSocket) {
+            io.to(targetSocket).emit('receive_message', {
+              message: message.toObject(),
+              type: 'private',
+            });
+          }
+          // Gửi cho người gọi
+          socket.emit('receive_message', {
+            message: message.toObject(),
+            type: 'private',
+          });
+        }
+      } catch (err) {
+        console.error('Call end message error:', err);
+      }
     });
 
     socket.on('group_call_offer', async ({ groupId, channelName, callerName, callerAvatar }) => {
@@ -355,6 +408,98 @@ const initializeSocket = (io) => {
         const targetSocketId = onlineUsers.get(memberId);
         if (targetSocketId) io.to(targetSocketId).emit('group_call_ended', { channelName });
       });
+    });
+
+    // ── Thread message (reply theo parent message) ──────────────────────────────
+    socket.on('send_thread_message', async ({ parentId, content, type = 'text' }) => {
+      if (!socket.userId) {
+        return socket.emit('message_error', { error: 'Not authenticated' });
+      }
+
+      try {
+        if (!parentId || !content || !content.trim()) {
+          return socket.emit('message_error', { error: 'Missing parentId or content' });
+        }
+
+        const parent = await Message.findById(parentId);
+        if (!parent || parent.isDeleted) {
+          return socket.emit('message_error', { error: 'Parent message not found' });
+        }
+
+        const userId = socket.userId;
+
+        // Kiểm tra quyền giống REST
+        if (parent.group) {
+          const group = await Group.findOne({
+            _id: parent.group,
+            'members.user': userId,
+            isActive: true,
+          });
+          if (!group) {
+            return socket.emit('message_error', { error: 'Not a member of this group' });
+          }
+        } else {
+          const isParticipant =
+            parent.sender?.toString() === userId.toString() ||
+            parent.receiver?.toString() === userId.toString();
+          if (!isParticipant) {
+            return socket.emit('message_error', { error: 'Not allowed to reply in this thread' });
+          }
+        }
+
+        const messageData = {
+          sender: userId,
+          thread: parentId,
+          type,
+          content: content.trim(),
+          readBy: [userId],
+        };
+
+        if (parent.group) {
+          messageData.group = parent.group;
+        } else if (parent.receiver) {
+          const otherUserId =
+            parent.sender.toString() === userId.toString()
+              ? parent.receiver
+              : parent.sender;
+          messageData.receiver = otherUserId;
+        }
+
+        const message = new Message(messageData);
+        await message.save();
+        await message.populate('sender', 'name avatar');
+        if (message.receiver) {
+          await message.populate('receiver', 'name avatar');
+        }
+
+        // Emit tới những client liên quan trong thread
+        const payload = {
+          parentId,
+          message: message.toObject(),
+        };
+
+        if (parent.group) {
+          io.to(`group:${parent.group.toString()}`).emit('receive_thread_message', payload);
+        } else {
+          const participants = new Set([
+            parent.sender.toString(),
+            parent.receiver?.toString(),
+          ].filter(Boolean));
+
+          participants.forEach((uid) => {
+            const sid = onlineUsers.get(uid);
+            if (sid) io.to(sid).emit('receive_thread_message', payload);
+          });
+        }
+
+        socket.emit('message_sent', {
+          messageId: message._id,
+          status: 'delivered',
+        });
+      } catch (error) {
+        console.error('Send thread message error:', error);
+        socket.emit('message_error', { error: 'Failed to send thread message' });
+      }
     });
   });
 };
