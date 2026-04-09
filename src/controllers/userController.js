@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const { cloudinary, upload } = require('../config/cloudinary');
 
 const getUsers = async (req, res) => {
     try {
@@ -134,7 +135,21 @@ const removePushToken = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
+const uploadAvatar = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { avatar: req.file.path }, // cloudinary trả về URL trong req.file.path
+      { new: true }
+    ).select('name email avatar role settings status');
+
+    res.json({ user: { id: user._id, ...user.toObject() } });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
 module.exports = {
     getUsers,
     getUserById,
@@ -143,4 +158,5 @@ module.exports = {
     getOnlineUsers,
     savePushToken,
     removePushToken,
+    uploadAvatar, 
 };

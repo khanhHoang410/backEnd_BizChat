@@ -90,6 +90,7 @@ const getProfile = async (req,res)=>{
       role: req.user.role,
       status: req.user.status,
       settings: req.user.settings,
+      createdAt: req.user.createdAt,
     },
   });
 }
