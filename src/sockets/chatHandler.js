@@ -294,12 +294,20 @@ const initializeSocket = (io) => {
     });
 
     // ── Call events ───────────────────────────────────────────────────────────
-    socket.on('call_offer', ({ to, channelName, callerName, callerAvatar, type }) => {
-      const targetSocket = onlineUsers.get(to);
-      if (targetSocket) {
-        io.to(targetSocket).emit('incoming_call', { from: socket.userId, channelName, callerName, callerAvatar, type });
-      }
-    });
+   socket.on('call_offer', ({ to, channelName, callerName, callerAvatar, type }) => {
+  console.log('📞 call_offer received');
+  console.log('👉 to:', to);
+  console.log('👥 onlineUsers size:', onlineUsers.size);
+  console.log('👥 onlineUsers keys:', [...onlineUsers.keys()]);
+  const targetSocket = onlineUsers.get(to);
+  console.log('🎯 targetSocket:', targetSocket);
+  if (targetSocket) {
+    io.to(targetSocket).emit('incoming_call', { from: socket.userId, channelName, callerName, callerAvatar, type });
+    console.log('✅ incoming_call emitted to', to);
+  } else {
+    console.log('❌ User', to, 'not in onlineUsers');
+  }
+});
   
     socket.on('call_accept', ({ to, channelName }) => {
       const targetSocket = onlineUsers.get(to);
