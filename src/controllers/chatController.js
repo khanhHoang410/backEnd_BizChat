@@ -462,6 +462,118 @@ const getPinnedMessages = async (req, res) => {
 module.exports = {
   getConversations, getMessages, sendMessage,
   markAsRead, deleteMessage, revokeMessage,
-  uploadImage, uploadDocument, getFiles,pinMessage,         
-  getPinnedMessages,    
+  uploadImage, uploadDocument, getFiles, pinMessage,
+  getPinnedMessages,
+  getThreadMessages, createThreadMessage, getThreadSummary,
 };
+
+// ─── Thread APIs ──────────────────────────────────────────────────────────────
+
+async function getThreadSummary(req, res) {
+  try {
+    const { targetId } = req.params;
+    const userId = req.user._id;
+    const isGroup = await Group.exists({ _id: targetId });
+
+    let matchQuery;
+    if (isGroup) {
+      const group = await Group.findOne({ _id: targetId, 'members.user': userId });
+      if (!group) return res.status(403).json({ error: 'Not a member' });
+      matchQuery = {
+        group: new mongoose.Types.ObjectId(targetId),
+        thread: { $exists: true },
+        isDeleted: false,
+      };
+    } else {
+      matchQuery = {
+        $or: [
+          { sender: new mongoose.Types.ObjectId(userId), receiver: new mongoose.Types.ObjectId(targetId) },
+          { sender: new mongoose.Types.ObjectId(targetId), receiver: new mongoose.Types.ObjectId(userId) },
+        ],
+        thread: { $exists: true },
+        isDeleted: false,
+      };
+    }
+
+    const rows = await Message.aggregate([
+      { $match: matchQuery },
+      { $group: { _id: '$thread', replyCount: { $sum: 1 }, lastReplyAt: { $max: '$createdAt' } } },
+      { $sort: { lastReplyAt: -1 } },
+      { $limit: 200 },
+    ]);
+
+    res.json({ threads: rows.map(r => ({ parentId: r._id, replyCount: r.replyCount, lastReplyAt: r.lastReplyAt })) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function getThreadMessages(req, res) {
+  try {
+    const { parentId } = req.params;
+    const userId = req.user._id;
+
+    const parent = await Message.findById(parentId)
+      .populate('sender', 'name avatar')
+      .populate('group', 'name members');
+
+    if (!parent || parent.isDeleted) return res.status(404).json({ error: 'Parent not found' });
+
+    // Kiểm tra quyền
+    if (parent.group) {
+      const group = await Group.findOne({ _id: parent.group, 'members.user': userId });
+      if (!group) return res.status(403).json({ error: 'Not a member' });
+    } else {
+      const ok = parent.sender?._id?.toString() === userId.toString() ||
+                 parent.receiver?.toString() === userId.toString();
+      if (!ok) return res.status(403).json({ error: 'Not allowed' });
+    }
+
+    const messages = await Message.find({ thread: parentId, isDeleted: false })
+      .populate('sender', 'name avatar')
+      .sort({ createdAt: 1 });
+
+    res.json({
+      parent: { _id: parent._id, content: parent.content, type: parent.type, sender: parent.sender, createdAt: parent.createdAt },
+      messages,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function createThreadMessage(req, res) {
+  try {
+    const { parentId } = req.params;
+    const { content, type = 'text' } = req.body;
+    const userId = req.user._id;
+
+    if (!content?.trim()) return res.status(400).json({ error: 'Content required' });
+
+    const parent = await Message.findById(parentId);
+    if (!parent || parent.isDeleted) return res.status(404).json({ error: 'Parent not found' });
+
+    if (parent.group) {
+      const group = await Group.findOne({ _id: parent.group, 'members.user': userId });
+      if (!group) return res.status(403).json({ error: 'Not a member' });
+    } else {
+      const ok = parent.sender?.toString() === userId.toString() ||
+                 parent.receiver?.toString() === userId.toString();
+      if (!ok) return res.status(403).json({ error: 'Not allowed' });
+    }
+
+    const msgData = { sender: userId, thread: parentId, type, content: content.trim(), readBy: [userId] };
+    if (parent.group) msgData.group = parent.group;
+    else if (parent.receiver) {
+      msgData.receiver = parent.sender.toString() === userId.toString() ? parent.receiver : parent.sender;
+    }
+
+    const message = new Message(msgData);
+    await message.save();
+    await message.populate('sender', 'name avatar');
+
+    res.status(201).json({ message });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}

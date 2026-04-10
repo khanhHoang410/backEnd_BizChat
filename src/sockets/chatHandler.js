@@ -52,7 +52,7 @@ const initializeSocket = (io) => {
 
         socket.join(`user:${userId}`);
         socket.broadcast.emit('user_status_change', { userId, status: 'online' });
-        socket.emit('auth_success'); // ← thêm dòng này
+        socket.emit('auth_success');
         console.log(`✅ User ${userId} authenticated on socket`);
       } catch (error) {
         console.error('Socket authentication failed:', error);

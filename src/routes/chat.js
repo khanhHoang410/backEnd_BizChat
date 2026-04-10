@@ -7,8 +7,8 @@ const {
   getConversations, getMessages, sendMessage,
   markAsRead, deleteMessage, revokeMessage,
   uploadImage, uploadDocument, getFiles,
-  pinMessage,           
-  getPinnedMessages,    
+  pinMessage, getPinnedMessages,
+  getThreadMessages, createThreadMessage, getThreadSummary,
 } = require('../controllers/chatController');
 
 const memoryUpload = multer({
@@ -31,9 +31,12 @@ router.post('/mark-read', auth, markAsRead);
 router.delete('/:messageId', auth, deleteMessage);
 router.patch('/:messageId/pin', auth, pinMessage);
 router.get('/pinned/:targetId', auth, getPinnedMessages);
-
-// ── Thu hồi tin nhắn ─────────────────────────────────────────────────────────
 router.patch('/:messageId/revoke', auth, revokeMessage);
+
+// ─── Thread routes ────────────────────────────────────────────────────────────
+router.get('/thread-summary/:targetId', auth, getThreadSummary);
+router.get('/thread/:parentId', auth, getThreadMessages);
+router.post('/thread/:parentId', auth, createThreadMessage);
 
 // ─── Upload routes ────────────────────────────────────────────────────────────
 router.post('/upload/image', auth, upload.single('file'), uploadImage);
