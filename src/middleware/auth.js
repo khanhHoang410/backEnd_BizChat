@@ -27,16 +27,46 @@ const auth = async (req, res, next) => {
         res.status(401).json({ error: 'Please authenticate' });
     }
 };
-const adminAuth = async (req,res,next)=>{
+
+/**
+ * Code cũ — giữ nguyên trong repo (không xóa).
+ * Lưu ý: cách gọi auth(req, res, callback) không khớp chữ ký middleware `auth` ở trên
+ * (auth chỉ gọi next() của Express), nên không dùng cho route production.
+ */
+const adminAuthLegacy = async (req, res, next) => {
     try {
-        await auth(req,res,()=>{
+        await auth(req, res, () => {
             if (req.user.role !== 'admin' && req.user.role !== 'super_admin') {
                 return res.status(403).json({ error: 'Admin access required' });
             }
             next();
-        })
+        });
     } catch (error) {
         res.status(401).json({ error: 'Please authenticate' });
     }
-}
-module.exports = { auth, adminAuth };
+};
+
+/** JWT + user phải có role admin hoặc super_admin — dùng cho /api/admin */
+const adminAuth = async (req, res, next) => {
+    try {
+        const token = req.header('Authorization')?.replace('Bearer ', '');
+        if (!token) {
+            return res.status(401).json({ error: 'Please authenticate' });
+        }
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const user = await User.findOne({ _id: decoded.userId, isActive: true });
+        if (!user) {
+            return res.status(401).json({ error: 'Please authenticate' });
+        }
+        if (user.role !== 'admin' && user.role !== 'super_admin') {
+            return res.status(403).json({ error: 'Admin access required' });
+        }
+        req.user = user;
+        req.token = token;
+        next();
+    } catch (error) {
+        res.status(401).json({ error: 'Please authenticate' });
+    }
+};
+
+module.exports = { auth, adminAuth, adminAuthLegacy };

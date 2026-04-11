@@ -10,6 +10,7 @@ const chatRoutes = require('./src/routes/chat');
 const userRoutes = require('./src/routes/users');
 const groupRoutes = require('./src/routes/groups');
 const agoraRoutes = require('./src/routes/agora');
+const adminRoutes = require('./src/routes/admin');
 const { auth } = require('./src/middleware/auth');
 
 
@@ -22,7 +23,7 @@ const server = http.createServer(app);
 // Cho phép tất cả origin vì đây là mobile app (không có domain cố định)
 const corsOptions = {
   origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: false, // phải false khi origin: '*'
 };
@@ -59,6 +60,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/groups', groupRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/agora', auth, agoraRoutes); 
 
 
