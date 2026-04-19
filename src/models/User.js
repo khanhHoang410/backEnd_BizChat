@@ -44,6 +44,11 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  /** Băm bcrypt — dùng cho đăng nhập admin; không trả về mặc định (select: false) */
+  passwordHash: {
+    type: String,
+    select: false,
+  },
   settings: {
     notifications: {
       type: Boolean,

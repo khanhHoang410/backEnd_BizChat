@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const { adminAuth } = require('../middleware/auth');
 const {
-  adminLogin,
   getAnalytics,
   listUsers,
   createUser,
@@ -14,7 +13,6 @@ const {
   getMessagesForModeration,
 } = require('../controllers/adminController');
 
-router.post('/login', adminLogin);
 router.use(adminAuth);
 
 router.get('/analytics', getAnalytics);

@@ -1,11 +1,52 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const { OAuth2Client } = require('google-auth-library');
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const generateToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
+};
+
+/** Giống app BizChat: POST /api/auth/login-email — email + mật khẩu (passwordHash). */
+const emailLogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || password == null || password === '') {
+      return res.status(400).json({ error: 'email and password required' });
+    }
+
+    const user = await User.findOne({
+      email: String(email).toLowerCase().trim(),
+      isActive: true,
+    }).select('+passwordHash');
+
+    if (!user?.passwordHash) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const match = await bcrypt.compare(String(password), user.passwordHash);
+    if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+
+    user.status = 'online';
+    await user.save();
+
+    const token = generateToken(user._id);
+    res.status(200).json({
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar,
+        role: user.role,
+        status: user.status,
+      },
+      token,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 };
 
 const googleAuth = async (req,res)=>{
@@ -96,6 +137,7 @@ const getProfile = async (req,res)=>{
 }
 module.exports = {
   googleAuth,
+  emailLogin,
   logout,
   getProfile,
 };

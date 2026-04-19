@@ -1,8 +1,10 @@
 const mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const Group = require('../models/Group');
 const Message = require('../models/Message');
+
+const BCRYPT_ROUNDS = 10;
 
 const ROLES = ['user', 'admin', 'super_admin'];
 const sod = (d) => {
@@ -18,33 +20,6 @@ const daysAgo = (n) => {
 
 const popGroup = (q) =>
   q.populate('members.user', 'name avatar email status').populate('admins', 'name avatar email');
-
-const adminLogin = async (req, res) => {
-  try {
-    const secret = process.env.ADMIN_PANEL_SECRET;
-    if (!secret) {
-      return res.status(503).json({ error: 'Set ADMIN_PANEL_SECRET in .env; user must be admin/super_admin.' });
-    }
-    const { email, panelSecret } = req.body;
-    if (!email || !panelSecret) return res.status(400).json({ error: 'email and panelSecret required' });
-    if (panelSecret !== secret) return res.status(401).json({ error: 'Invalid credentials' });
-
-    const user = await User.findOne({
-      email: String(email).toLowerCase().trim(),
-      isActive: true,
-      role: { $in: ['admin', 'super_admin'] },
-    });
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-
-    const token = jwt.sign({ userId: user._id.toString() }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.json({
-      token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role },
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-};
 
 const getAnalytics = async (req, res) => {
   try {
@@ -121,7 +96,7 @@ const listUsers = async (req, res) => {
 
 const createUser = async (req, res) => {
   try {
-    const { name, email, role = 'user' } = req.body;
+    const { name, email, role = 'user', password } = req.body;
     if (!name || !email) return res.status(400).json({ error: 'name and email required' });
 
     let r = ROLES.includes(role) ? role : 'user';
@@ -132,13 +107,19 @@ const createUser = async (req, res) => {
     const em = email.toLowerCase().trim();
     if (await User.exists({ email: em })) return res.status(409).json({ error: 'Email already registered' });
 
-    const user = await User.create({
+    const payload = {
       name: name.trim(),
       email: em,
       role: r,
       status: 'offline',
       isActive: true,
-    });
+    };
+    if (password != null && String(password).length > 0) {
+      if (String(password).length < 6) return res.status(400).json({ error: 'password must be at least 6 characters' });
+      payload.passwordHash = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
+    }
+
+    const user = await User.create(payload);
 
     res.status(201).json({
       user: {
@@ -159,7 +140,7 @@ const createUser = async (req, res) => {
 const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, status, role, isActive } = req.body;
+    const { name, email, status, role, isActive, password } = req.body;
     const target = await User.findById(id);
     if (!target) return res.status(404).json({ error: 'User not found' });
 
@@ -194,6 +175,12 @@ const updateUser = async (req, res) => {
         return res.status(400).json({ error: 'Cannot deactivate yourself' });
       }
       $set.isActive = Boolean(isActive);
+    }
+    if (password !== undefined && password !== '') {
+      if (String(password).length < 6) {
+        return res.status(400).json({ error: 'password must be at least 6 characters' });
+      }
+      $set.passwordHash = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
     }
 
     const user = await User.findByIdAndUpdate(id, { $set }, { new: true }).select(
@@ -306,7 +293,6 @@ const getMessagesForModeration = async (req, res) => {
 };
 
 module.exports = {
-  adminLogin,
   getAnalytics,
   listUsers,
   createUser,
