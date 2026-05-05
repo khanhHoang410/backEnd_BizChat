@@ -465,6 +465,7 @@ module.exports = {
   uploadImage, uploadDocument, getFiles, pinMessage,
   getPinnedMessages,
   getThreadMessages, createThreadMessage, getThreadSummary,
+  createPoll, votePoll,
 };
 
 // ─── Thread APIs ──────────────────────────────────────────────────────────────
@@ -573,6 +574,95 @@ async function createThreadMessage(req, res) {
     await message.populate('sender', 'name avatar');
 
     res.status(201).json({ message });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+// ─── Poll APIs ────────────────────────────────────────────────────────────────
+
+async function createPoll(req, res) {
+  try {
+    const { groupId, question, options } = req.body;
+    const userId = req.user._id;
+
+    if (!groupId || !question?.trim() || !options || options.length < 2) {
+      return res.status(400).json({ error: 'Cần groupId, question và ít nhất 2 options' });
+    }
+
+    const group = await Group.findOne({ _id: groupId, 'members.user': userId, isActive: true });
+    if (!group) return res.status(403).json({ error: 'Bạn không phải thành viên nhóm' });
+
+    const message = new Message({
+      sender: userId,
+      group: groupId,
+      type: 'poll',
+      content: question.trim(),
+      metadata: {
+        poll: {
+          options: options.map(o => o.trim()).filter(Boolean),
+          votes: [],
+        },
+      },
+      readBy: [userId],
+    });
+
+    await message.save();
+    await message.populate('sender', 'name avatar');
+    await Group.findByIdAndUpdate(groupId, { lastMessage: message._id });
+
+    res.status(201).json({ message });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function votePoll(req, res) {
+  try {
+    const { messageId } = req.params;
+    const { optionIndex } = req.body;
+    const userId = req.user._id;
+
+    const message = await Message.findById(messageId);
+    if (!message || message.type !== 'poll') {
+      return res.status(404).json({ error: 'Poll không tồn tại' });
+    }
+
+    // Kiểm tra quyền
+    if (message.group) {
+      const group = await Group.findOne({ _id: message.group, 'members.user': userId });
+      if (!group) return res.status(403).json({ error: 'Bạn không phải thành viên nhóm' });
+    }
+
+    const poll = message.metadata?.poll;
+    if (!poll) return res.status(400).json({ error: 'Không có dữ liệu poll' });
+    if (optionIndex < 0 || optionIndex >= poll.options.length) {
+      return res.status(400).json({ error: 'Option không hợp lệ' });
+    }
+
+    // Xóa vote cũ của user nếu có
+    message.metadata.poll.votes = poll.votes.filter(
+      v => v.user.toString() !== userId.toString()
+    );
+
+    // Thêm vote mới (nếu optionIndex === -1 thì bỏ vote)
+    if (optionIndex >= 0) {
+      message.metadata.poll.votes.push({ user: userId, option: optionIndex });
+    }
+
+    message.markModified('metadata');
+    await message.save();
+    await message.populate('sender', 'name avatar');
+
+    // Emit socket realtime
+    const io = req.app.get('io');
+    if (io && message.group) {
+      io.to(`group:${message.group}`).emit('poll_updated', {
+        messageId: message._id,
+        poll: message.metadata.poll,
+      });
+    }
+
+    res.json({ success: true, poll: message.metadata.poll });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

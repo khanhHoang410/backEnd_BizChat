@@ -9,6 +9,7 @@ const {
   uploadImage, uploadDocument, getFiles,
   pinMessage, getPinnedMessages,
   getThreadMessages, createThreadMessage, getThreadSummary,
+  createPoll, votePoll,
 } = require('../controllers/chatController');
 
 const memoryUpload = multer({
@@ -37,6 +38,10 @@ router.patch('/:messageId/revoke', auth, revokeMessage);
 router.get('/thread-summary/:targetId', auth, getThreadSummary);
 router.get('/thread/:parentId', auth, getThreadMessages);
 router.post('/thread/:parentId', auth, createThreadMessage);
+
+// ─── Poll routes ──────────────────────────────────────────────────────────────
+router.post('/poll', auth, createPoll);
+router.post('/poll/:messageId/vote', auth, votePoll);
 
 // ─── Upload routes ────────────────────────────────────────────────────────────
 router.post('/upload/image', auth, upload.single('file'), uploadImage);

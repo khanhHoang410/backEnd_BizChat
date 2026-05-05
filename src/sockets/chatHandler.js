@@ -259,6 +259,38 @@ const initializeSocket = (io) => {
     });
 
     // ── Typing ────────────────────────────────────────────────────────────────
+    // ── Vote Poll (realtime) ──────────────────────────────────────────────────
+    socket.on('vote_poll', async ({ messageId, optionIndex }) => {
+      if (!socket.userId) return;
+      try {
+        const message = await Message.findById(messageId);
+        if (!message || message.type !== 'poll') return;
+
+        // Xóa vote cũ
+        message.metadata.poll.votes = message.metadata.poll.votes.filter(
+          v => v.user.toString() !== socket.userId
+        );
+
+        // Thêm vote mới nếu optionIndex hợp lệ
+        if (optionIndex >= 0 && optionIndex < message.metadata.poll.options.length) {
+          message.metadata.poll.votes.push({ user: socket.userId, option: optionIndex });
+        }
+
+        message.markModified('metadata');
+        await message.save();
+
+        // Emit cho cả nhóm
+        if (message.group) {
+          io.to(`group:${message.group}`).emit('poll_updated', {
+            messageId: message._id,
+            poll: message.metadata.poll,
+          });
+        }
+      } catch (error) {
+        console.error('Vote poll error:', error);
+      }
+    });
+
     socket.on('typing', (data) => {
       if (!socket.userId) return;
 
@@ -514,4 +546,3 @@ const initializeSocket = (io) => {
 };
 
 module.exports = { initializeSocket };
-
