@@ -130,7 +130,7 @@ const getMessages = async (req, res) => {
     if (isGroup) {
       const group = await Group.findOne({ _id: targetId, 'members.user': userId });
       if (!group) return res.status(403).json({ error: 'Not a member of this group' });
-      query = { group: targetId };
+      query = { group: targetId, thread: { $exists: false } };
     } else {
       query = {
         $or: [
